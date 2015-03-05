@@ -54,7 +54,14 @@ int main(int argc, char * argv[])
 		// if it has been updated
 		if (status & State::UPDATED_RGB)
             currentRGB = wrap.RGB;
-
+        
+        // create a grayscale from the RGB
+        cv::Mat src_gray;
+        cv::cvtColor( currentRGB, src_gray, cv::COLOR_RGB2GRAY );
+        //cv::adaptiveThreshold(src_gray, src_gray, 255, cv::ADAPTIVE_THRESH_MEAN_C, cv::THRESH_BINARY_INV, 3, 0);
+        //std::cout << cv::mean(src_gray) << std::endl;
+        cv::threshold( src_gray, src_gray, 190, 255,cv::THRESH_BINARY);
+        
 		// Determine if Depth is updated, and grabs the image
 		// if it has been updated
 		if (status & State::UPDATED_DEPTH)
@@ -62,7 +69,7 @@ int main(int argc, char * argv[])
             //currentDepth = wrap.Depth;
         
         cv::Mat thresholded;
-        cv::threshold( currentDepth, thresholded, THRESHOLD_VALUE, 255,1);
+        cv::threshold( currentDepth, thresholded, THRESHOLD_VALUE, 255,cv::THRESH_BINARY_INV);
         
         // create a region of interest that removes the last 9 pixels of the depth data
         // this is inf due to the Kinect using a correlation window 9 pixels wide and needs to be removed to get
@@ -80,6 +87,9 @@ int main(int argc, char * argv[])
         // apply the transform to the depth image
         cv::warpAffine(thresholded,thresholded,trans_mat,thresholded.size());
         
+        cv::bitwise_and(thresholded, src_gray, src_gray);
+        //cv::bitwise_or(src_gray, thresholded, src_gray);
+        
         // convert the depth image back into RGB channels from grayscale
         cvtColor(thresholded,thresholded, cv::COLOR_GRAY2BGR);
         
@@ -89,6 +99,7 @@ int main(int argc, char * argv[])
         
 		// Show the images in the windows
         cv::imshow("RGB", currentRGB);
+        cv::imshow("Grayscale", src_gray);
         cv::imshow("Masked", masked);
         cv::imshow("Depth", thresholded);
         
