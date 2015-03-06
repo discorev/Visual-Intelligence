@@ -125,6 +125,7 @@ uint8_t FreenectPlaybackWrapper::GetNextFrame()
 		chrono::milliseconds now = chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now().time_since_epoch());
 		chrono::milliseconds time_to_wait = chrono::milliseconds((int)diff) - (now - previous_time_ran);
 		
+        // delay to make it "real time"
 		if (time_to_wait.count() > 0)
 			this_thread::sleep_for(time_to_wait);
 	}

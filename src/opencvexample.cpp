@@ -3,6 +3,12 @@
 
 #define THRESHOLD_VALUE 100 //14
 
+// create a nice little structure for each frame
+struct frame {
+    cv::Mat RGB;
+    cv::Mat Depth;
+};
+
 int main(int argc, char * argv[])
 {
     std::string file = "./data";
@@ -18,9 +24,9 @@ int main(int argc, char * argv[])
     }
     
     FreenectPlaybackWrapper wrap(file);
-
-	cv::Mat currentRGB;
-	cv::Mat currentDepth;
+    
+    frame current; // store the grame in a struct, this makes it easier to save them :D
+    // when RGB or Depth are updated, consider it a new frame
 
 	// Create the RGB and Depth Windows
 	cv::namedWindow("RGB", cv::WINDOW_AUTOSIZE);
@@ -50,24 +56,24 @@ int main(int argc, char * argv[])
 		// Determine if RGB is updated, and grabs the image
 		// if it has been updated
 		if (status & State::UPDATED_RGB)
-            currentRGB = wrap.RGB;
+            current.RGB = wrap.RGB;
         
         // create a grayscale from the RGB
         cv::Mat src_gray;
-        cv::cvtColor( currentRGB, src_gray, cv::COLOR_RGB2GRAY );
+        cv::cvtColor( current.RGB, src_gray, cv::COLOR_RGB2GRAY );
         cv::threshold( src_gray, src_gray, 190, 255,cv::THRESH_BINARY);
         //cv::blur( src_gray, src_gray, cv::Size(10,10) );
         
 		// Determine if Depth is updated, and grabs the image
 		// if it has been updated
 		if (status & State::UPDATED_DEPTH)
-            currentDepth = wrap.Depth+158; // push the background to inf
+            current.Depth = wrap.Depth+158; // push the background to inf
                                            // this makes the normalization spread the arm and object further
-        cv::normalize(currentDepth, currentDepth, 0, 255, cv::NORM_MINMAX, CV_8UC1);
+        cv::normalize(current.Depth, current.Depth, 0, 255, cv::NORM_MINMAX, CV_8UC1);
         
         // apply a threshold to the image
         cv::Mat thresholded;
-        cv::threshold( currentDepth, thresholded, THRESHOLD_VALUE, 255,cv::THRESH_BINARY_INV);
+        cv::threshold( current.Depth, thresholded, THRESHOLD_VALUE, 255,cv::THRESH_BINARY_INV);
         
         // create a region of interest that removes the last 9 pixels of the depth data
         // this is inf due to the Kinect using a correlation window 9 pixels wide and needs to be removed to get
@@ -92,6 +98,8 @@ int main(int argc, char * argv[])
         // clean up the thresholded RGB image and then
         cv::bitwise_and(thresholded, src_gray, src_gray);
         cv::bitwise_or(thresholded, src_gray, thresholded);
+        
+        cv::imshow("Raw Depth", thresholded);
         
         // ------ DETECT CONTOURS AND OBJECT IN IMAGE ------
         
@@ -159,10 +167,10 @@ int main(int argc, char * argv[])
         
         
         // use the contour region as a mask
-        cv::bitwise_and(currentRGB, masked, masked);
+        cv::bitwise_and(current.RGB, masked, masked);
         
 		// Show the images in the windows
-        cv::imshow("RGB", currentRGB);
+        cv::imshow("RGB", current.RGB);
         cv::imshow("Object", drawing);
         cv::imshow("Masked", masked);
         
