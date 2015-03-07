@@ -22,6 +22,9 @@ int main(int argc, char * argv[])
             return 0; // finish help
         }
     }
+    std::vector<std::vector<frame>> all_objects;
+    
+    std::vector<frame> current_object;
     
     FreenectPlaybackWrapper wrap(file);
     
@@ -45,6 +48,9 @@ int main(int argc, char * argv[])
 	// The status can by bitwise AND to determine if the RGB or
 	// Depth image has been updated using the State enum.
 	uint8_t status = 255;
+    
+    // is there an object on the screen or not
+    bool object_on_screen = false;
 
 	while (key != 27 && status != 0)
 	{
@@ -62,7 +68,6 @@ int main(int argc, char * argv[])
         cv::Mat src_gray;
         cv::cvtColor( current.RGB, src_gray, cv::COLOR_RGB2GRAY );
         cv::threshold( src_gray, src_gray, 190, 255,cv::THRESH_BINARY);
-        //cv::blur( src_gray, src_gray, cv::Size(10,10) );
         
 		// Determine if Depth is updated, and grabs the image
 		// if it has been updated
@@ -99,6 +104,8 @@ int main(int argc, char * argv[])
         cv::bitwise_and(thresholded, src_gray, src_gray);
         cv::bitwise_or(thresholded, src_gray, thresholded);
         
+        // save tresholded for use later & display it on screen
+        cv::Mat depth_raw = thresholded.clone(); // initalize with a clone the matrix rather than pointer to it
         cv::imshow("Raw Depth", thresholded);
         
         // ------ DETECT CONTOURS AND OBJECT IN IMAGE ------
@@ -120,47 +127,59 @@ int main(int argc, char * argv[])
             }
         }
         
+        std::vector<cv::Point> largestContour(contours.at(largest_contour_index));
+        
         /// Approximate contours to polygons + get bounding rects and circles
         std::vector<std::vector<cv::Point> > contours_poly( contours.size() );
         cv::Rect boundRect;
         cv::Point2f center;
         float radius;
         
-        for( int i = 0; i < contours.size(); i++ )
+        
+        if(contours.size() > 0)
         {
-            if(i == largest_contour_index)
+            cv::approxPolyDP( cv::Mat(contours[largest_contour_index]), contours_poly[largest_contour_index], 3, true );
+            boundRect = cv::boundingRect( cv::Mat(contours_poly[largest_contour_index]) );
+            cv::minEnclosingCircle( (cv::Mat)contours_poly[largest_contour_index], center, radius );
+            
+            // attempt to remove noise by removing areas that are too small
+            if(boundRect.size().width < 100 && (boundRect.size().height < 40 || boundRect.br().x > 590))
             {
-                cv::approxPolyDP( cv::Mat(contours[largest_contour_index]), contours_poly[largest_contour_index], 3, true );
-                boundRect = cv::boundingRect( cv::Mat(contours_poly[largest_contour_index]) );
-                cv::minEnclosingCircle( (cv::Mat)contours_poly[largest_contour_index], center, radius );
-
-                // attempt to remove noise by removing areas that are too small
-                if(boundRect.size().width < 100 && (boundRect.size().height < 40 || boundRect.br().x > 590))
-                {
-                    boundRect = cv::Rect(0,0,0,0);
-                    contours_poly.clear();
-                    center = cv::Point2f(0,0);
-                    radius = 0;
-                }
+                boundRect = cv::Rect(0,0,0,0);
+                contours_poly.clear();
+                center = cv::Point2f(0,0);
+                radius = 0;
             }
         }
         
         /// Draw polygonal contour + bonding rects + circles
         cv::Mat drawing = cv::Mat::zeros( src_gray.size(), CV_8UC3 );
         cv::Mat masked = cv::Mat::zeros( src_gray.size(), CV_8UC3 );
-        for( int i = 0; i< contours.size(); i++ )
+        if(contours.size() > 0)
         {
-            if(i == largest_contour_index)
+            cv::Scalar color = cv::Scalar( 255, 0, 0 );
+            // if the bound rect bottom right is 590 or higher, the object is  still entering
+            // the image
+            if(boundRect.area() > 0 && boundRect.br().x <= 590)
             {
-                cv::Scalar color = cv::Scalar( 255, 0, 0 );
-                // if the bound rect bottom right is 590 or higher, the object is  still entering
-                // the image
-                if(boundRect.br().x <= 590)
-                    cv::drawContours( masked, contours_poly, i, cv::Scalar(255,255,255), cv::FILLED );
-                cv::drawContours( drawing, contours_poly, i, color, 1, 8, std::vector<cv::Vec4i>(), 0, cv::Point() );
-                cv::rectangle( drawing, boundRect.tl(), boundRect.br(), color, 2, 8, 0 );
-                cv::circle( drawing, center, (int)radius, color, 2, 8, 0 );
+                cv::drawContours( masked, contours_poly, largest_contour_index, cv::Scalar(255,255,255), cv::FILLED );
+                if(!object_on_screen)
+                {
+                    std::cout << "Object has appeared" << std::endl;
+                    object_on_screen = true;
+                }
+                frame store = {current.RGB(boundRect), depth_raw(boundRect)}; // create the frame with just the ROI
+                current_object.push_back(store);
+            } else if(object_on_screen)
+            {
+                std::cout << "Object has gone!" << std::endl;
+                object_on_screen = false;
+                all_objects.push_back(current_object);
+                current_object.clear();
             }
+            cv::drawContours( drawing, contours_poly, largest_contour_index, color, 1, 8, std::vector<cv::Vec4i>(), 0, cv::Point() );
+            cv::rectangle( drawing, boundRect.tl(), boundRect.br(), color, 2, 8, 0 );
+            cv::circle( drawing, center, (int)radius, color, 2, 8, 0 );
         }
         
         // ------ END DETECTING CONTOURS ------
@@ -177,6 +196,20 @@ int main(int argc, char * argv[])
 		// Check for keyboard input
 		key = cv::waitKey(10);
 	}
+    cv::destroyAllWindows();
+    std::cout << all_objects.size() << " Objects have been found in the video" << std::endl;
+    
+    // run through the bloody lot
+    for(std::vector<frame> object_frames : all_objects)
+    {
+        for(int i=0; i<object_frames.size();i++)
+        {
+            frame cur = object_frames.at(i);
+            cv::imshow("RGB", cur.RGB);
+            cv::imshow("Depth", cur.Depth);
+            cv::waitKey(0);
+        }
+    }
 
 	return 0;
 }
