@@ -9,6 +9,12 @@ struct frame {
     cv::Mat Depth;
 };
 
+struct processed_frame {
+    frame original_frame;
+    cv::Mat masked_depth;
+    std::vector<cv::Point> countour_poly;
+};
+
 int main(int argc, char * argv[])
 {
     std::string file = "./data";
@@ -22,9 +28,9 @@ int main(int argc, char * argv[])
             return 0; // finish help
         }
     }
-    std::vector<std::vector<frame>> all_objects;
+    std::vector<std::vector<processed_frame>> all_objects;
     
-    std::vector<frame> current_object;
+    std::vector<processed_frame> current_object;
     
     FreenectPlaybackWrapper wrap(file);
     
@@ -116,7 +122,7 @@ int main(int argc, char * argv[])
         cv::findContours( thresholded, contours, hierarchy, cv::RETR_CCOMP, cv::CHAIN_APPROX_SIMPLE );
         
         double largest_area=0;
-        int largest_contour_index=0;
+        int largest_contour_index=-1;
         
         for( int i = 0; i < contours.size(); i++ )
         {
@@ -126,8 +132,8 @@ int main(int argc, char * argv[])
                 largest_area = a; largest_contour_index = i;
             }
         }
-        
-        std::vector<cv::Point> largestContour(contours.at(largest_contour_index));
+        if(largest_contour_index > -1)
+            std::vector<cv::Point> largestContour(contours.at(largest_contour_index));
         
         /// Approximate contours to polygons + get bounding rects and circles
         std::vector<std::vector<cv::Point> > contours_poly( contours.size() );
@@ -138,9 +144,9 @@ int main(int argc, char * argv[])
         
         if(contours.size() > 0)
         {
-            cv::approxPolyDP( cv::Mat(contours[largest_contour_index]), contours_poly[largest_contour_index], 3, true );
-            boundRect = cv::boundingRect( cv::Mat(contours_poly[largest_contour_index]) );
-            cv::minEnclosingCircle( (cv::Mat)contours_poly[largest_contour_index], center, radius );
+            cv::approxPolyDP( cv::Mat(contours[largest_contour_index]), contours_poly[0], 3, true );
+            boundRect = cv::boundingRect( cv::Mat(contours_poly[0]) );
+            cv::minEnclosingCircle( (cv::Mat)contours_poly[0], center, radius );
             
             // attempt to remove noise by removing areas that are too small
             if(boundRect.size().width < 100 && (boundRect.size().height < 40 || boundRect.br().x > 590))
@@ -162,14 +168,18 @@ int main(int argc, char * argv[])
             // the image
             if(boundRect.area() > 0 && boundRect.br().x <= 590)
             {
-                cv::drawContours( masked, contours_poly, largest_contour_index, cv::Scalar(255,255,255), cv::FILLED );
+                // convert the contour into a filled bit mask and then apply it to the RGB image to only
+                // see the object that is found in the depth
+                cv::drawContours( masked, contours_poly, 0, cv::Scalar(255,255,255), cv::FILLED );
+                cv::bitwise_and(current.RGB, masked, masked);
                 if(!object_on_screen)
                 {
                     std::cout << "Object has appeared" << std::endl;
                     object_on_screen = true;
                 }
                 frame store = {current.RGB(boundRect), depth_raw(boundRect)}; // create the frame with just the ROI
-                current_object.push_back(store);
+                processed_frame proc_f = {store, masked(boundRect), contours_poly[0]};
+                current_object.push_back(proc_f);
             } else if(object_on_screen)
             {
                 std::cout << "Object has gone!" << std::endl;
@@ -177,16 +187,12 @@ int main(int argc, char * argv[])
                 all_objects.push_back(current_object);
                 current_object.clear();
             }
-            cv::drawContours( drawing, contours_poly, largest_contour_index, color, 1, 8, std::vector<cv::Vec4i>(), 0, cv::Point() );
+            cv::drawContours( drawing, contours_poly, 0, color, 1, 8, std::vector<cv::Vec4i>(), 0, cv::Point() );
             cv::rectangle( drawing, boundRect.tl(), boundRect.br(), color, 2, 8, 0 );
             cv::circle( drawing, center, (int)radius, color, 2, 8, 0 );
         }
         
         // ------ END DETECTING CONTOURS ------
-        
-        
-        // use the contour region as a mask
-        cv::bitwise_and(current.RGB, masked, masked);
         
 		// Show the images in the windows
         cv::imshow("RGB", current.RGB);
@@ -199,14 +205,15 @@ int main(int argc, char * argv[])
     cv::destroyAllWindows();
     std::cout << all_objects.size() << " Objects have been found in the video" << std::endl;
     
-    // run through the bloody lot
-    for(std::vector<frame> object_frames : all_objects)
+    // run through the saved frames
+    for(std::vector<processed_frame> object_frames : all_objects)
     {
         for(int i=0; i<object_frames.size();i++)
         {
-            frame cur = object_frames.at(i);
+            frame cur = object_frames.at(i).original_frame;
             cv::imshow("RGB", cur.RGB);
             cv::imshow("Depth", cur.Depth);
+            cv::imshow("Masked", object_frames.at(i).masked_depth);
             cv::waitKey(0);
         }
     }
