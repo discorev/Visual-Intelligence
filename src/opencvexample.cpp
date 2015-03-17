@@ -1,4 +1,5 @@
 #include <opencv2/opencv.hpp>
+#include <opencv2/ml.hpp>
 #include "freenect-playback-wrapper.h"
 
 #define THRESHOLD_VALUE 100 //14
@@ -11,7 +12,7 @@ struct frame {
 
 struct processed_frame {
     frame original_frame;
-    cv::Mat masked_depth;
+    cv::Mat masked_RGB;
     std::vector<cv::Point> countour_poly;
 };
 
@@ -57,6 +58,7 @@ int main(int argc, char * argv[])
     
     // is there an object on the screen or not
     bool object_on_screen = false;
+    bool unrecognised_Object = true;
 
 	while (key != 27 && status != 0)
 	{
@@ -178,7 +180,7 @@ int main(int argc, char * argv[])
                     object_on_screen = true;
                 }
                 frame store = {current.RGB(boundRect), depth_raw(boundRect)}; // create the frame with just the ROI
-                processed_frame proc_f = {store, masked(boundRect), contours_poly[0]};
+                processed_frame proc_f = {store, masked, contours_poly[0]};
                 current_object.push_back(proc_f);
             } else if(object_on_screen)
             {
@@ -205,18 +207,40 @@ int main(int argc, char * argv[])
     cv::destroyAllWindows();
     std::cout << all_objects.size() << " Objects have been found in the video" << std::endl;
     
-    // run through the saved frames
+    cv::Mat classes;
+    cv::Mat trainingData;
+    
+    cv::Mat trainingImages;
+    std::vector<int> trainingLabels;
+    // run through the saved frames and convert them to training data.
+    int label = 0;
     for(std::vector<processed_frame> object_frames : all_objects)
     {
         for(int i=0; i<object_frames.size();i++)
         {
             frame cur = object_frames.at(i).original_frame;
-            cv::imshow("RGB", cur.RGB);
-            cv::imshow("Depth", cur.Depth);
-            cv::imshow("Masked", object_frames.at(i).masked_depth);
-            cv::waitKey(0);
+            if(label == 11 && i >= 253)
+            {
+                cv::imshow("RGB", cur.RGB);
+                cv::imshow("Depth", cur.Depth);
+                cv::imshow("Masked", object_frames.at(i).masked_RGB);
+                cv::waitKey(0);
+            } else {
+            trainingImages.push_back(object_frames.at(i).masked_RGB.reshape(1, 1));
+            trainingLabels.push_back(label);
+            }
         }
+        label++;
     }
+    cv::Mat(trainingImages).copyTo(trainingData);
+    trainingData.convertTo(trainingData, CV_32FC1);
+    cv::Mat(trainingLabels).copyTo(classes);
+    
+//    cv::FileStorage fs("SVM.xml", cv::FileStorage::WRITE);
+    cv::ml::SVM::Params params;
+    params.kernelType = cv::ml::SVM::LINEAR;
+    cv::Ptr<cv::ml::SVM> svm = cv::ml::StatModel::train<cv::ml::SVM>(trainingData, cv::ml::ROW_SAMPLE, classes, params);
+    svm->save("SVM.xml");
 
 	return 0;
 }
