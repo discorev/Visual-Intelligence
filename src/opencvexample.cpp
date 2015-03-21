@@ -2,7 +2,14 @@
 #include <opencv2/ml.hpp>
 #include "freenect-playback-wrapper.h"
 
-#define THRESHOLD_VALUE 100 //14
+// Key settings
+#define THRESHOLD_VALUE 100 //14        // Filtering threshold value for depth
+#define STD_SIZE cv::Size(250,250)      // Standardized size of image for SVM
+
+// learning flag
+#define LEARNING false
+// debugging flags
+#define DEBUG_NOISE_FILTER false
 
 // create a nice little structure for each frame
 struct frame {
@@ -29,10 +36,28 @@ int main(int argc, char * argv[])
             return 0; // finish help
         }
     }
+    
+#if !(LEARNING)
+    // load trained SVM
+    cv::Ptr<cv::ml::SVM> svm = cv::ml::StatModel::load<cv::ml::SVM>("SVM.xml");
+    // load labels
+    std::vector<std::string>labels;
+    std::ifstream labelFile("labels.txt");
+    if(labelFile.is_open())
+    {
+        std::string line;
+        while(std::getline(labelFile, line))
+        {
+            labels.push_back(line);
+        }
+    } else {
+        std::cerr << "Failed to open labels file." << std::endl;
+    }
+#else
     std::vector<std::vector<processed_frame>> all_objects;
     
     std::vector<processed_frame> current_object;
-    
+#endif
     FreenectPlaybackWrapper wrap(file);
     
     frame current; // store the grame in a struct, this makes it easier to save them :D
@@ -58,7 +83,10 @@ int main(int argc, char * argv[])
     
     // is there an object on the screen or not
     bool object_on_screen = false;
+#if !(LEARNING)
     bool unrecognised_Object = true;
+    int current_object = -1;
+#endif
 
 	while (key != 27 && status != 0)
 	{
@@ -134,8 +162,6 @@ int main(int argc, char * argv[])
                 largest_area = a; largest_contour_index = i;
             }
         }
-        if(largest_contour_index > -1)
-            std::vector<cv::Point> largestContour(contours.at(largest_contour_index));
         
         /// Approximate contours to polygons + get bounding rects and circles
         std::vector<std::vector<cv::Point> > contours_poly( contours.size() );
@@ -143,16 +169,19 @@ int main(int argc, char * argv[])
         cv::Point2f center;
         float radius;
         
-        
-        if(contours.size() > 0)
+        // if there are contours, and a largest has been found out of them
+        if(contours.size() > 0 && largest_contour_index > -1)
         {
             cv::approxPolyDP( cv::Mat(contours[largest_contour_index]), contours_poly[0], 3, true );
             boundRect = cv::boundingRect( cv::Mat(contours_poly[0]) );
             cv::minEnclosingCircle( (cv::Mat)contours_poly[0], center, radius );
             
             // attempt to remove noise by removing areas that are too small
-            if(boundRect.size().width < 100 && (boundRect.size().height < 40 || boundRect.br().x > 590))
+            if(boundRect.size().width < 100 && (boundRect.size().height < 40 || boundRect.br().x > 590 || (boundRect.size().height < 100 && boundRect.br().y > 440)))
             {
+#if DEBUG_NOISE_FILTER
+                std::cout << boundRect.br() << std::endl;
+#endif
                 boundRect = cv::Rect(0,0,0,0);
                 contours_poly.clear();
                 center = cv::Point2f(0,0);
@@ -179,15 +208,39 @@ int main(int argc, char * argv[])
                     std::cout << "Object has appeared" << std::endl;
                     object_on_screen = true;
                 }
+#if !(LEARNING)
+                // see if we can recognise the object
+                cv::Mat stdSize, svmPredict;
+                // resize each image/ROI to a standard size (defined as STD_SIZE) and save it in stdSize
+                cv::resize(masked(boundRect).clone(), stdSize, STD_SIZE);
+                svmPredict.push_back(stdSize.reshape(1,1));
+                svmPredict.convertTo(svmPredict, CV_32FC1);
+                int object_class = svm->predict(svmPredict);
+                if(unrecognised_Object)
+                {
+                    std::cout << labels[object_class] << std::endl;
+                    unrecognised_Object = false;
+                } else if(current_object != object_class)
+                {
+                    std::cout << "Object changed to: " << labels[object_class] << " - that was unexpected!" << std::endl;
+                }
+                current_object = object_class; // update the current object class
+#else
                 frame store = {current.RGB(boundRect), depth_raw(boundRect)}; // create the frame with just the ROI
-                processed_frame proc_f = {store, masked, contours_poly[0]};
+                processed_frame proc_f = {store, masked(boundRect).clone(), contours_poly[0]};
                 current_object.push_back(proc_f);
+#endif
             } else if(object_on_screen)
             {
                 std::cout << "Object has gone!" << std::endl;
                 object_on_screen = false;
+#if !(LEARNING)
+                unrecognised_Object = true;
+                current_object = -1;
+#else
                 all_objects.push_back(current_object);
                 current_object.clear();
+#endif
             }
             cv::drawContours( drawing, contours_poly, 0, color, 1, 8, std::vector<cv::Vec4i>(), 0, cv::Point() );
             cv::rectangle( drawing, boundRect.tl(), boundRect.br(), color, 2, 8, 0 );
@@ -205,8 +258,9 @@ int main(int argc, char * argv[])
 		key = cv::waitKey(10);
 	}
     cv::destroyAllWindows();
+#if LEARNING
     std::cout << all_objects.size() << " Objects have been found in the video" << std::endl;
-    
+
     cv::Mat classes;
     cv::Mat trainingData;
     
@@ -219,16 +273,12 @@ int main(int argc, char * argv[])
         for(int i=0; i<object_frames.size();i++)
         {
             frame cur = object_frames.at(i).original_frame;
-            if(label == 11 && i >= 253)
-            {
-                cv::imshow("RGB", cur.RGB);
-                cv::imshow("Depth", cur.Depth);
-                cv::imshow("Masked", object_frames.at(i).masked_RGB);
-                cv::waitKey(0);
-            } else {
-            trainingImages.push_back(object_frames.at(i).masked_RGB.reshape(1, 1));
-            trainingLabels.push_back(label);
-            }
+            cv::Mat stdSize;
+            // resize each image/ROI to a standard size of 64px x 64px and save it in stdSize
+            // UPDATE: the standard size is now a define as STD_SIZE so that it can be altered.
+            cv::resize(object_frames.at(i).masked_RGB, stdSize, STD_SIZE);
+            trainingImages.push_back(stdSize.reshape(1, 1)); // add the vector to be learnt
+            trainingLabels.push_back(label); // set the label for the current vector.
         }
         label++;
     }
@@ -236,11 +286,11 @@ int main(int argc, char * argv[])
     trainingData.convertTo(trainingData, CV_32FC1);
     cv::Mat(trainingLabels).copyTo(classes);
     
-//    cv::FileStorage fs("SVM.xml", cv::FileStorage::WRITE);
     cv::ml::SVM::Params params;
     params.kernelType = cv::ml::SVM::LINEAR;
     cv::Ptr<cv::ml::SVM> svm = cv::ml::StatModel::train<cv::ml::SVM>(trainingData, cv::ml::ROW_SAMPLE, classes, params);
     svm->save("SVM.xml");
+#endif
 
 	return 0;
 }
