@@ -29,8 +29,9 @@ int main(int argc, char * argv[])
 {
     // by default just look for a directory ./data containing the kinect data.
     std::string file = "./data";
+    std::string svm_filename = "SVM.xml";
     // if the user has passed an argument, process it.
-    if(argc == 2)
+    if(argc >= 2)
     {
         file = std::string(argv[1]); // read in the argument as the location for the kinect data
         if(file.compare("--help") == 0) // in the case the argument was a request for help, give some!
@@ -40,10 +41,21 @@ int main(int argc, char * argv[])
             return 0; // finish help
         }
     }
+    if(argc > 2) {
+        // loop through and see what the arguments are
+        for(int i=0; i < argc-2; i++)
+        {
+            std::string arg(argv[2+i]);
+            if(arg.compare("--svm") == 0 && (argc >= 3+i))
+            {
+                svm_filename = std::string(argv[3+i]); // the next argument should be the file name for the SVM
+            }
+        }
+    }
     
 #if !(LEARNING)
     // load trained SVM from SVM.xml
-    cv::Ptr<cv::ml::SVM> svm = cv::ml::StatModel::load<cv::ml::SVM>("SVM.xml");
+    cv::Ptr<cv::ml::SVM> svm = cv::ml::StatModel::load<cv::ml::SVM>(svm_filename);
     // load the class labels from from labels.txt
     std::vector<std::string>labels = std::vector<std::string>();
     std::ifstream labelFile("labels.txt");
@@ -346,7 +358,7 @@ int main(int argc, char * argv[])
     std::cout << "Training the SVM" << std::endl;
     cv::Ptr<cv::ml::SVM> svm = cv::ml::StatModel::train<cv::ml::SVM>(trainingData, cv::ml::ROW_SAMPLE, classes, params);
     std::cout << "SVM trained.\n Saving to SVM.xml" << std::endl;
-    svm->save("SVM.xml");
+    svm->save(svm_filename);
     std::cout << "SVM has been saved!" << std::endl;
 #endif
 
