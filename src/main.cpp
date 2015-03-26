@@ -9,6 +9,8 @@
 // SVM learning flags
 #define LEARNING false                  // Should this run be used to generate the SVM model?
 #define SVM_LINEAR_KERNAL true          // Use Linear kernel or radial basis function
+#define SVM_INC_DEPTH false             // SVM includes the depth in the vector.
+                                        // This MUST be set to false to test on the older SVM files
 // debugging flags
 #define DEBUG_NOISE_FILTER false        // Output the co-ordinates of the bottom right corner of noise that's filtered
 
@@ -49,6 +51,7 @@ int main(int argc, char * argv[])
             if(arg.compare("--svm") == 0 && (argc >= 3+i))
             {
                 svm_filename = std::string(argv[3+i]); // the next argument should be the file name for the SVM
+                i++; // we can skip past the next parameter
             }
         }
     }
@@ -252,9 +255,11 @@ int main(int argc, char * argv[])
                 // resize each image/ROI to a standard size (defined as STD_SIZE) and save it in stdSize
                 cv::resize(masked(boundRect).clone(), stdSize, STD_SIZE, cv::INTER_CUBIC);// cv::INTER_NEAREST);
                 svmPredict.push_back(stdSize.reshape(1,1)); // make the image into a line vector
+#if SVM_INC_DEPTH
                 cv::cvtColor(depth_raw, depth_raw, cv::COLOR_GRAY2BGR);
                 cv::resize(depth_raw(boundRect).clone(), stdSize, STD_SIZE, cv::INTER_CUBIC);
                 svmPredict.push_back(stdSize.reshape(1,1));
+#endif
                 svmPredict = svmPredict.reshape(1,1);
                 svmPredict.convertTo(svmPredict, CV_32FC1); // ensure that vector is of the right type
                 int object_class = svm->predict(svmPredict);// get the class prediction from the SVM
@@ -337,9 +342,11 @@ int main(int argc, char * argv[])
             cv::resize(object_frames.at(i).masked_RGB, stdSize, STD_SIZE, cv::INTER_CUBIC); // cv::INTER_NEAREST);
             svmTrain.push_back(stdSize.reshape(1,1));
             // UPDATE 2: push the depth onto the train image as well
+#if SVM_INC_DEPTH
             cv::cvtColor(object_frames.at(i).original_frame.Depth, depthTmp, cv::COLOR_GRAY2RGB);
             cv::resize(depthTmp, stdSize, STD_SIZE, cv::INTER_CUBIC);
             svmTrain.push_back(stdSize.reshape(1,1));
+#endif
             trainingImages.push_back(svmTrain.reshape(1,1));
             trainingLabels.push_back(label); // set the label for the current vector.
         }
