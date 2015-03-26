@@ -9,7 +9,7 @@
 // SVM learning flags
 #define LEARNING false                  // Should this run be used to generate the SVM model?
 #define SVM_LINEAR_KERNAL true          // Use Linear kernel or radial basis function
-#define SVM_INC_DEPTH false             // SVM includes the depth in the vector.
+#define SVM_INC_DEPTH true              // SVM includes the depth in the vector.
                                         // This MUST be set to false to test on the older SVM files
 // debugging flags
 #define DEBUG_NOISE_FILTER false        // Output the co-ordinates of the bottom right corner of noise that's filtered
@@ -268,6 +268,10 @@ int main(int argc, char * argv[])
                 {
                     // if not recognised yet, print the label found in the SVM and set that it has been recognised
                     std::cout << labels[object_class] << std::endl;
+#if __APPLE__
+                    std::string soundOutput = "say " + labels[object_class];
+                    std::system(soundOutput.c_str());
+#endif
                     unrecognised_Object = false;
                 } else if(current_object != object_class)
                 {
@@ -275,6 +279,7 @@ int main(int argc, char * argv[])
                     std::cout << "Object changed to: " << labels[object_class] << " - that was unexpected!" << std::endl;
                 }
                 current_object = object_class; // update the current object class
+                cv::putText(masked, labels[current_object], cv::Point2f(masked.rows/2,450), cv::FONT_HERSHEY_PLAIN, 4, cv::Scalar(0,0,255, 255),3);
 #else
                 // if learning, make sure that the new frame is pushed back onto the current object vector
                 frame store = {current.RGB(boundRect), depth_raw(boundRect).clone()}; // create the frame with just the ROI

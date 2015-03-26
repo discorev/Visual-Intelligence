@@ -5,11 +5,11 @@ Currently there is a flag in the opencvexample.cpp file that sets if the compile
 
 ## Compiling
 
-To compile cd to the directory the code is in then run `cmake` followed by `make`, e.g.
+To compile cd to the directory the code is in then run `cmake .` followed by `make`, e.g.
 
 ```
 cd ./Visual-Intelligence
-cmake
+cmake .
 make
 ```
 ## Usage
